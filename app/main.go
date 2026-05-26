@@ -3,9 +3,12 @@ package main
 import (
 	"bytes"
 	"compress/zlib"
+	"crypto/sha1"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
+	"slices"
 )
 
 func main() {
@@ -57,6 +60,56 @@ func main() {
 		}
 
 		fmt.Printf("%s", content)
+	case "hash-object":
+		filePath := os.Args[3]
+
+		file, err := os.Open(filePath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fatal: could not open '%s' for reading: %s", filePath, err)
+			break
+		}
+
+		fileContent, err := io.ReadAll(file)
+		file.Close()
+		if err != nil {
+			fmt.Fprint(os.Stderr, "fatal: unnable to read file\n")
+			break
+		}
+
+		header := fmt.Appendf(nil, "blob %d\x00", len(fileContent))
+
+		object := slices.Concat(header, fileContent)
+
+		hashBytes := sha1.Sum(object)
+
+		hash := hex.EncodeToString(hashBytes[:])
+
+		dir := ".git/objects/" + hash[:2]
+		err = os.MkdirAll(dir, 0o755)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fatal: unnable to create object directory: %s\n", err)
+			break
+		}
+
+		objectPath := dir + "/" + hash[2:]
+
+		objectFile, err := os.OpenFile(objectPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fatal: unnable to create object file: %s\n", err)
+			break
+		}
+		defer objectFile.Close()
+
+		w := zlib.NewWriter(objectFile)
+		defer w.Close()
+
+		_, err = w.Write(object)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fatal: unnable to write to object file: %s\n", err)
+			break
+		}
+
+		fmt.Printf("%s\n", hash)
 
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
